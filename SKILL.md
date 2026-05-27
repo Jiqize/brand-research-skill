@@ -8,6 +8,14 @@ description: >
   produce a visual brand deck, or investigate any brand's market position. Also triggers for fashion
   brand analysis, Korean/Chinese designer brand research, 小红书品牌分析, or any request involving
   小红书 data for brand intelligence. Even casual mentions like "帮我看看XX品牌" should trigger this skill.
+compatibility:
+  tools:
+    - Playwright MCP (for 小红书 browsing + PDF + screenshot)
+    - Python 3.10+ with matplotlib
+    - curl (for image download)
+    - Web search (for brand background research)
+  optional:
+    - OpenCLI (~/Desktop/git/opencli, for structured 小红书 search)
 ---
 
 # Brand Research Report Generator
@@ -40,6 +48,13 @@ A complete brand research package saved to `~/Desktop/output/<brand>品牌调研
 | `keywords` | No | Auto | 小红书 search keyword groups |
 | `focus` | No | General | Research focus area |
 | `output_dir` | No | `~/Desktop/output/<brand>品牌调研` | Output directory |
+
+## Dependencies
+
+Before running, ensure these are available:
+- **matplotlib**: `pip install matplotlib` (for chart generation)
+- **Playwright MCP**: Must be connected for 小红书 browsing, PDF export, and screenshots
+- **curl**: For downloading note cover images
 
 ---
 
@@ -98,7 +113,6 @@ Use whatever 小红书 tool is available. **Recommended order:**
      return JSON.stringify(results);
    }
    ```
-   Note: Requires user to scan QR login first if session is not active.
 
 3. **Web search** — last resort, limited by search engine indexing of 小红书
 
@@ -128,7 +142,7 @@ Save as `notes.json`:
 Download the **first image** from each note. Number sequentially: `img_001.jpg`, `img_002.jpg`, ...
 
 ```bash
-curl -s -o images/img_001.jpg "image_url_here"
+curl -s -H "User-Agent: Mozilla/5.0" -o images/img_001.jpg "image_url_here"
 ```
 
 Keep a mapping of note index → image filename for `report_data.json` references.
@@ -157,6 +171,8 @@ Classify each note into categories. Common types:
 | Brand Review | 韩国品牌排名, 设计师评测, 从夯到拉 |
 | Brand Feature | 秀场报道, 新系列介绍, 品牌故事 |
 | Cultural/Location | 建筑设计, 城市探索, 旗舰店打卡 |
+| Celebrity/Endorser | 代言人穿搭, 明星同款, 种草 |
+| Try-on/Review | 试穿测评, 真实上身, 踩雷 |
 
 ### 2.2 Calculate metrics
 
@@ -214,8 +230,6 @@ Produces:
 - `chart_interactions.jpg` — grouped bar chart (likes, collects, comments for top notes)
 - `chart_scatter.jpg` — scatter plot of likes vs collects with diagonal reference line
 
-Requires: `matplotlib` (`pip install matplotlib` if missing)
-
 ### 3.3 Build HTML report
 
 ```bash
@@ -230,24 +244,43 @@ The HTML is self-contained (images embedded as base64). Uses Playfair Display se
 
 ### 3.4 Convert to PDF
 
-Use Playwright browser to print HTML to PDF:
+Start a local HTTP server to serve the HTML (Playwright blocks file:// protocol), then use `browser_run_code_unsafe` to export PDF:
+
+```bash
+cd <output_dir>/output && python3 -m http.server 8767 &
+```
 
 ```javascript
 async (page) => {
-  await page.goto('file:///<absolute-path-to-report.html>', { waitUntil: 'networkidle0' });
+  await page.goto('http://localhost:8767/report.html');
   await page.pdf({ path: '<output_dir>/output/report.pdf', format: 'A4', printBackground: true, margin: { top: '0', bottom: '0', left: '0', right: '0' } });
   return 'PDF saved';
 }
 ```
+
+Kill the server after: `pkill -f "http.server 8767"`
 
 ### 3.5 Take screenshot for sharing
 
 Use Playwright to capture a full-page PNG:
 
 1. Set viewport width to 1000px
-2. Navigate to `file:///<path-to-report.html>`
+2. Navigate to `http://localhost:8767/report.html`
 3. Take full-page screenshot
-4. Save as `~/Desktop/output/<brand>品牌调研.png`
+4. Copy to `~/Desktop/output/<brand>品牌调研.png`
+
+---
+
+## Troubleshooting
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| 小红书 shows "登录后查看" | Playwright browser not logged in | Ask user to scan QR code via 小红书 App. Navigate to explore page, close popup, show QR. |
+| OpenCLI "Missing X-AutoCLI header" | Browser extension not injecting headers | Fall back to Playwright method. User can try `cd ~/Desktop/git/opencli && node dist/main.js setup` |
+| matplotlib font warnings (emoji) | Chinese font doesn't have emoji glyphs | Harmless, charts still render. `generate_charts.py` auto-strips emoji from titles. |
+| curl image download returns tiny file | Missing User-Agent header | Use `curl -s -H "User-Agent: Mozilla/5.0" -o path url` |
+| Playwright file:// blocked | Security policy | Use local HTTP server (`python3 -m http.server`) to serve HTML |
+| `pip install matplotlib` fails | No pip / virtual env | Try `pip3 install matplotlib` or `python3 -m pip install matplotlib` |
 
 ---
 
@@ -255,19 +288,46 @@ Use Playwright to capture a full-page PNG:
 
 Before delivering, verify:
 - [ ] At least 10 notes collected with complete data
-- [ ] Note images downloaded successfully
+- [ ] Note images downloaded successfully (each > 5KB)
 - [ ] `report_data.json` has all 8 required sections
 - [ ] Charts render with readable Chinese text
 - [ ] HTML report opens correctly in browser
 - [ ] PDF is properly formatted with no clipped content
 - [ ] Screenshot PNG captured and saved to output directory
 
-## Adapting to Different Tools
+---
 
-This skill is tool-agnostic for data collection. The agent should use whatever 小红书 access is available:
+## Complete Example: CHUU Brand Research
 
-- **OpenCLI** (`~/Desktop/git/opencli`) — CLI tool for 小红书 search
-- **MCP servers** — any configured 小红书 MCP tools
-- **Web search + scraping** — fallback if no direct access
+**Input**: User says "帮我调研chuu品牌"
 
-The critical contract is the `notes.json` format — as long as data arrives in that structure, the rest of the pipeline works identically.
+### Step-by-step execution:
+
+**Phase 1.1**: `mkdir -p ~/Desktop/output/chuu品牌调研/{images,ai_images,output}`
+
+**Phase 1.2**: Generate keywords: `chuu穿搭`, `chuu试穿`, `chuu韩国女装`, `chuu品牌`, `chuu赵露思`
+
+**Phase 1.3**: Use Playwright to navigate to 小红书 search pages, extract 30+ notes with JS, deduplicate to 15 unique notes sorted by likes.
+
+Result (`notes.json` top 5):
+```json
+[
+  {"title":"Chuu支持代言人赵露思！","author":"瑶大王","likes":3275,"id":"6971c7e6..."},
+  {"title":"🩶 recent moment","author":"阿庆庆庆庆","likes":1392,"id":"6a018417..."},
+  {"title":"Universal in BJ","author":"EDENiliN_ed","likes":1167,"id":"69f31d0b..."},
+  {"title":"163🍐｜露思新代言chuu秋冬款测评","author":"贝拉妮妮Nini","likes":545,"id":"6960eb4f..."},
+  {"title":"美丽波点-ins韩女时髦法则","author":"小羊-Eun","likes":307,"id":"69faa854..."}
+]
+```
+
+**Phase 1.4**: `curl -s -H "User-Agent: Mozilla/5.0" -o images/img_001.jpg "..."` × 15
+
+**Phase 1.5**: Web search → chuu founded 2012, PPB Studio, entered China 2021, 141 stores by 2023, 赵露思 global ambassador 2026-01, quality controversy, IP strategy (小玉/堆堆/孢绒绒)
+
+**Phase 2**: Categorize → 40% celebrity/endorser, 33% OOTD, 20% brand intro, 7% store visit. Key insight: 3275-like post is 13x average = heavy reliance on 赵露思.
+
+**Phase 3.1**: Write `report_data.json` with 8 sections covering background, data cards, insights, note gallery, content analysis, charts, competitor comparison (vs NERDY, Mardi Mercredi, UR, MO&Co.), conclusions.
+
+**Phase 3.2-3.5**: Run scripts → generate charts → build HTML → PDF → screenshot.
+
+**Final output**: 2.2MB PNG screenshot + 9.4MB PDF + 1.4MB HTML, all in `~/Desktop/output/chuu品牌调研/`
