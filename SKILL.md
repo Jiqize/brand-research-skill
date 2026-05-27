@@ -69,7 +69,13 @@ For each keyword group, search and collect notes. Target **10-15 high-quality no
 
 Use whatever 小红书 tool is available. **Recommended order:**
 
-1. **Playwright browser** (most reliable) — Navigate to search page, extract DOM with JS:
+1. **OpenCLI** (`~/Desktop/git/opencli`) — Structured JSON output, best when working:
+   ```bash
+   cd ~/Desktop/git/opencli && node dist/main.js xiaohongshu search "keyword" -f json --limit 20
+   ```
+   Requires: daemon running (`node dist/main.js doctor`), Chrome extension connected, 小红书 cookie valid.
+
+2. **Playwright browser** (reliable fallback) — When OpenCLI is unavailable, use Playwright to navigate and extract:
    ```
    Navigate to: https://www.xiaohongshu.com/search_result?keyword={keyword}&source=web_search_result_notes
    Wait 3 seconds, then run the extraction JS below
@@ -94,9 +100,7 @@ Use whatever 小红书 tool is available. **Recommended order:**
    ```
    Note: Requires user to scan QR login first if session is not active.
 
-2. **OpenCLI** (`~/Desktop/git/opencli`) — `node dist/main.js xiaohongshu search "keyword" -f json --limit 20`
-
-3. **Web search** — fallback, limited by search engine indexing of 小红书
+3. **Web search** — last resort, limited by search engine indexing of 小红书
 
 After collecting from all keyword groups, deduplicate by `note_id`, sort by `likes` descending, keep top 15.
 
